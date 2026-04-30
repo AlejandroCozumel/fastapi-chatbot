@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     resend_from_email: str | None = None
     openai_chat_model: str = "gpt-4o-mini"
     openai_embedding_model: str = "text-embedding-3-small"
+    telegram_bot_token: str | None = None
+    telegram_allowed_user_ids: str | None = None
     max_upload_bytes: int = Field(default=5 * 1024 * 1024)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

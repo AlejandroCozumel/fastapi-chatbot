@@ -106,3 +106,16 @@ class EmailSendRecord(TimestampMixin, Base):
     provider_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(20))
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class TelegramUser(TimestampMixin, Base):
+    __tablename__ = "telegram_users"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    telegram_user_id: Mapped[int] = mapped_column(unique=True, index=True)
+    telegram_chat_id: Mapped[int] = mapped_column(index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    conversation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("conversations.id"),
+        nullable=True,
+    )

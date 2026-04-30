@@ -7,3 +7,12 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
+  telegram:
+    build: .
+    command: python -m app.telegram_worker
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - api

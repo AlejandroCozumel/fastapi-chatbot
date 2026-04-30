@@ -31,6 +31,8 @@ JWT_SECRET_KEY=change-me-for-local-dev
 DATABASE_URL=sqlite:///./data/app.db
 UPLOAD_DIR=./data/uploads
 ACCESS_TOKEN_EXPIRE_MINUTES=60
+TELEGRAM_BOT_TOKEN=replace-with-telegram-bot-token
+TELEGRAM_ALLOWED_USER_IDS=
 ```
 
 ## Local Run
@@ -53,6 +55,11 @@ docker compose up --build
 ```
 
 The app listens on `http://127.0.0.1:8000`.
+
+Docker Compose also starts the optional Telegram long polling worker. Set
+`TELEGRAM_BOT_TOKEN` in `.env` to enable it. For a one-user local test, set
+`TELEGRAM_ALLOWED_USER_IDS` to your Telegram numeric user id. Leave it empty to
+allow any Telegram user who can message the bot.
 
 ## Tests
 
