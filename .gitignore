@@ -40,9 +40,9 @@ dist/
 .vscode/
 
 # RAG / chatbot local data
-data/
-documents/
-uploads/
+data/*
+documents/*
+uploads/*
 storage/
 vector_store/
 vectorstore/
