@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+
+# FastAPI / local server
+*.log
+logs/
+.pid
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# RAG / chatbot local data
+data/
+documents/
+uploads/
+storage/
+vector_store/
+vectorstore/
+chroma/
+chroma_db/
+faiss_index/
+*.faiss
+*.index
+*.sqlite
+*.sqlite3
+*.db
+
+# Model and embedding caches
+.cache/
+cache/
+models/
+embeddings/
+*.onnx
+*.bin
+*.safetensors
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Keep examples safe to commit
+!data/.gitkeep
+!documents/.gitkeep
+!uploads/.gitkeep
