@@ -1,4 +1,6 @@
 import asyncio
+import html
+import re
 import secrets
 from dataclasses import dataclass
 from typing import Any
@@ -6,11 +8,18 @@ from typing import Any
 import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from pydantic import TypeAdapter, ValidationError
+from pydantic.networks import EmailStr
 
 from app.core.config import get_settings
 from app.core.security import hash_password
-from app.db.models import TelegramUser, User
-from app.services.conversations import send_chat_message
+from app.db.models import Message, TelegramUser, User
+from app.schemas.email import ConfirmEmailRequest, EmailDraftRequest
+from app.services.chat import get_assistant_response
+from app.services.conversations import save_chat_exchange, send_chat_message
+from app.services.demo_documents import seed_demo_documents_for_user
+from app.services.email import confirm_and_send_email, create_email_draft
+from app.services.rag import answer_from_documents, user_has_document_chunks
 
 
 class TelegramConfigError(RuntimeError):
@@ -23,6 +32,66 @@ class TelegramMessage:
     chat_id: int
     user_id: int
     text: str
+
+
+PENDING_EMAIL_SENDS: set[int] = set()
+EMAIL_ADAPTER = TypeAdapter(EmailStr)
+
+
+def format_telegram_html(text: str) -> str:
+    formatted_lines: list[str] = []
+    for line in text.splitlines():
+        formatted_lines.append(re.sub(r"^#{1,6}\s*", "", line))
+
+    escaped = html.escape("\n".join(formatted_lines), quote=False)
+    return re.sub(r"\*\*([^*\n]+)\*\*", r"<b>\1</b>", escaped)
+
+
+def format_email_html(text: str) -> str:
+    blocks: list[str] = []
+    bullet_items: list[str] = []
+
+    def flush_bullets() -> None:
+        if bullet_items:
+            blocks.append("<ul>" + "".join(bullet_items) + "</ul>")
+            bullet_items.clear()
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            flush_bullets()
+            continue
+
+        heading_match = re.match(r"^(#{1,6})\s+(.+)$", line)
+        if heading_match:
+            flush_bullets()
+            level = min(len(heading_match.group(1)) + 1, 4)
+            content = _format_inline_email_html(heading_match.group(2))
+            blocks.append(f"<h{level}>{content}</h{level}>")
+            continue
+
+        bullet_match = re.match(r"^[-*]\s+(.+)$", line)
+        if bullet_match:
+            bullet_items.append(f"<li>{_format_inline_email_html(bullet_match.group(1))}</li>")
+            continue
+
+        flush_bullets()
+        blocks.append(f"<p>{_format_inline_email_html(line)}</p>")
+
+    flush_bullets()
+    return "\n".join(blocks)
+
+
+def _format_inline_email_html(text: str) -> str:
+    escaped = html.escape(text, quote=False)
+    return re.sub(r"\*\*([^*\n]+)\*\*", r"<strong>\1</strong>", escaped)
+
+
+def validate_recipient_email(value: str) -> str | None:
+    try:
+        return str(EMAIL_ADAPTER.validate_python(value.strip()))
+    except ValidationError:
+        return None
 
 
 def get_telegram_token() -> str:
@@ -75,6 +144,7 @@ def get_or_create_telegram_user(
     db: Session,
     telegram_user_id: int,
     telegram_chat_id: int,
+    auto_seed_demo_documents: bool = True,
 ) -> TelegramUser:
     mapping = db.scalar(
         select(TelegramUser).where(TelegramUser.telegram_user_id == telegram_user_id)
@@ -84,6 +154,11 @@ def get_or_create_telegram_user(
             mapping.telegram_chat_id = telegram_chat_id
             db.commit()
             db.refresh(mapping)
+        if auto_seed_demo_documents:
+            user = db.get(User, mapping.user_id)
+            if user is None:
+                raise RuntimeError("Mapped Telegram user is missing")
+            seed_demo_documents_for_user(db, user)
         return mapping
 
     username = f"telegram_{telegram_user_id}"
@@ -104,11 +179,87 @@ def get_or_create_telegram_user(
     db.add(mapping)
     db.commit()
     db.refresh(mapping)
+    if auto_seed_demo_documents:
+        seed_demo_documents_for_user(db, user)
     return mapping
 
 
 def handle_start_message() -> str:
-    return "Hi. Send me a message and I will reply using the chatbot."
+    return (
+        "Hi. Send me a message and I will reply using the chatbot. "
+        "If demo documents are loaded for your Telegram user, I can answer using them. "
+        "Send /send when you want me to email your profile summary."
+    )
+
+
+def build_profile_email_body(db: Session, user: User) -> str:
+    messages = list(
+        db.scalars(
+            select(Message)
+            .join(Message.conversation)
+            .where(Message.conversation.has(user_id=user.id))
+            .order_by(Message.created_at.desc())
+            .limit(20)
+        )
+    )
+    messages.reverse()
+    transcript = "\n".join(
+        f"{message.role}: {message.content}" for message in messages
+    )
+    if not transcript:
+        transcript = "No previous chat messages are available for this Telegram user."
+
+    prompt = (
+        "Create a concise customer profile summary from this Telegram chatbot "
+        "conversation. Include likely interests, requested products, questions, "
+        "and next steps. Do not invent personal data.\n\n"
+        f"Conversation:\n{transcript}"
+    )
+    summary = get_assistant_response(prompt)
+    return (
+        "<h1>Telegram customer profile</h1>"
+        f"{format_email_html(summary)}"
+    )
+
+
+def send_profile_email(db: Session, user: User, recipient: str) -> str:
+    body = build_profile_email_body(db, user)
+    draft = create_email_draft(
+        db,
+        user,
+        EmailDraftRequest(
+            recipient=recipient,
+            subject="Telegram customer profile",
+            body=body,
+        ),
+    )
+    record = confirm_and_send_email(
+        db,
+        user,
+        draft.id,
+        ConfirmEmailRequest(
+            confirm=True,
+            recipient=draft.recipient,
+            subject=draft.subject,
+            body=draft.body,
+        ),
+    )
+    if record.status != "sent":
+        return f"Email send failed: {record.error_message or 'unknown error'}"
+    return f"Email sent to {recipient}."
+
+
+def handle_send_command(message: TelegramMessage) -> str:
+    PENDING_EMAIL_SENDS.add(message.user_id)
+    return "Send me the email address where I should send your profile summary."
+
+
+def handle_pending_email_send(db: Session, message: TelegramMessage, user: User) -> str:
+    recipient = validate_recipient_email(message.text)
+    if recipient is None:
+        return "That does not look like a valid email address. Send a valid email or /cancel."
+    PENDING_EMAIL_SENDS.discard(message.user_id)
+    return send_profile_email(db, user, recipient)
 
 
 def handle_text_message(db: Session, message: TelegramMessage) -> str:
@@ -121,12 +272,30 @@ def handle_text_message(db: Session, message: TelegramMessage) -> str:
     if user is None:
         raise RuntimeError("Mapped Telegram user is missing")
 
-    conversation, assistant_message = send_chat_message(
-        db,
-        user,
-        message.text,
-        mapping.conversation_id,
-    )
+    if message.text == "/cancel":
+        PENDING_EMAIL_SENDS.discard(message.user_id)
+        return "Cancelled."
+    if message.text == "/send":
+        return handle_send_command(message)
+    if message.user_id in PENDING_EMAIL_SENDS:
+        return handle_pending_email_send(db, message, user)
+
+    if user_has_document_chunks(db, user):
+        assistant_content, _, _ = answer_from_documents(db, user, message.text)
+        conversation, assistant_message = save_chat_exchange(
+            db,
+            user,
+            message.text,
+            assistant_content,
+            mapping.conversation_id,
+        )
+    else:
+        conversation, assistant_message = send_chat_message(
+            db,
+            user,
+            message.text,
+            mapping.conversation_id,
+        )
     if mapping.conversation_id is None:
         mapping.conversation_id = conversation.id
         db.commit()
@@ -166,7 +335,11 @@ class TelegramClient:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
                 f"{self.base_url}/sendMessage",
-                json={"chat_id": chat_id, "text": text},
+                json={
+                    "chat_id": chat_id,
+                    "text": format_telegram_html(text),
+                    "parse_mode": "HTML",
+                },
             )
             response.raise_for_status()
 

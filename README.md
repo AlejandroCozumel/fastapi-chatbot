@@ -61,6 +61,44 @@ Docker Compose also starts the optional Telegram long polling worker. Set
 `TELEGRAM_ALLOWED_USER_IDS` to your Telegram numeric user id. Leave it empty to
 allow any Telegram user who can message the bot.
 
+Every accepted Telegram user automatically gets the local Grupo Pellas demo
+documents indexed for RAG the first time they message the bot. The seeding is
+idempotent, so the same documents are not duplicated for an existing Telegram
+user.
+
+## Telegram Demo Documents
+
+The repository includes fictitious Grupo Pellas demo documents for local RAG
+testing:
+
+- `sample_documents/grupo_pellas_motos_demo.md`
+- `sample_documents/grupo_pellas_vehiculos_faq_demo.md`
+
+Load them into the local database for one Telegram user:
+
+```bash
+python3 -m app.scripts.seed_grupo_pellas_demo
+```
+
+With Docker Compose:
+
+```bash
+docker compose run --rm api python -m app.scripts.seed_grupo_pellas_demo
+```
+
+By default, the seed command uses the numeric Telegram user id or ids from
+`TELEGRAM_ALLOWED_USER_IDS` in `.env`. You can also pass
+`--telegram-user-id YOUR_TELEGRAM_USER_ID` explicitly.
+
+After seeding, message the Telegram bot with questions such as:
+
+- `Que modelos de moto tienen?`
+- `Cual es la garantia demo?`
+- `Que requisitos piden para financiamiento?`
+
+The sample documents are demo data only and are not official Grupo Pellas
+information.
+
 ## Tests
 
 ```bash

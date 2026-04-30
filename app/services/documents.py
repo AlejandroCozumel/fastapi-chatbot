@@ -36,6 +36,50 @@ def _chunks(text: str, size: int = 1200, overlap: int = 150) -> list[str]:
     return chunks
 
 
+def index_document_text(
+    db: Session,
+    user: User,
+    filename: str,
+    text: str,
+    content_type: str | None = "text/markdown",
+    storage_path: str | None = None,
+) -> Document:
+    document = Document(
+        user_id=user.id,
+        filename=filename,
+        content_type=content_type,
+        storage_path=storage_path or filename,
+        status="uploaded",
+    )
+    db.add(document)
+    db.flush()
+
+    chunk_texts = _chunks(text)
+    if not chunk_texts:
+        document.status = "failed"
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Document has no extractable text",
+        )
+
+    for index, content in enumerate(chunk_texts):
+        embedding = create_embedding(content)
+        db.add(
+            DocumentChunk(
+                document_id=document.id,
+                user_id=user.id,
+                chunk_index=index,
+                content=content,
+                embedding_json=serialize_embedding(embedding),
+            )
+        )
+    document.status = "processed"
+    db.commit()
+    db.refresh(document)
+    return document
+
+
 async def upload_document(db: Session, user: User, file: UploadFile) -> Document:
     settings = get_settings()
     if file.content_type not in SUPPORTED_CONTENT_TYPES:
@@ -70,29 +114,16 @@ async def upload_document(db: Session, user: User, file: UploadFile) -> Document
 
     try:
         text = _extract_text(path, file.content_type)
-        chunk_texts = _chunks(text)
-        if not chunk_texts:
-            document.status = "failed"
-            db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Document has no extractable text",
-            )
-        for index, content in enumerate(chunk_texts):
-            embedding = create_embedding(content)
-            db.add(
-                DocumentChunk(
-                    document_id=document.id,
-                    user_id=user.id,
-                    chunk_index=index,
-                    content=content,
-                    embedding_json=serialize_embedding(embedding),
-                )
-            )
-        document.status = "processed"
-        db.commit()
-        db.refresh(document)
-        return document
+        db.delete(document)
+        db.flush()
+        return index_document_text(
+            db,
+            user,
+            filename=file.filename or safe_name,
+            text=text,
+            content_type=file.content_type,
+            storage_path=str(path),
+        )
     except HTTPException:
         raise
     except Exception as exc:

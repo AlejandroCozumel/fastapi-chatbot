@@ -45,6 +45,17 @@ def send_chat_message(
     message: str,
     conversation_id: int | None = None,
 ) -> tuple[Conversation, Message]:
+    assistant_content = get_assistant_response(message)
+    return save_chat_exchange(db, user, message, assistant_content, conversation_id)
+
+
+def save_chat_exchange(
+    db: Session,
+    user: User,
+    message: str,
+    assistant_content: str,
+    conversation_id: int | None = None,
+) -> tuple[Conversation, Message]:
     if conversation_id is None:
         conversation = Conversation(user_id=user.id, title=_title_from_message(message))
         db.add(conversation)
@@ -60,7 +71,6 @@ def send_chat_message(
     db.add(user_message)
     db.flush()
 
-    assistant_content = get_assistant_response(message)
     assistant_message = Message(
         conversation_id=conversation.id,
         role="assistant",

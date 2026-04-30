@@ -82,3 +82,14 @@ def answer_from_documents(db: Session, user: User, question: str) -> tuple[str, 
     context = "\n\n".join(chunk.content for chunk in selected)
     answer = get_assistant_response(question, context=context)
     return answer, sorted({chunk.document_id for chunk in selected}), context
+
+
+def user_has_document_chunks(db: Session, user: User) -> bool:
+    return (
+        db.scalar(
+            select(DocumentChunk.id)
+            .where(DocumentChunk.user_id == user.id)
+            .limit(1)
+        )
+        is not None
+    )
