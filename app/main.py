@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
 
+from app.api.routes import auth
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.db.session import init_db
@@ -23,6 +24,7 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    app.include_router(auth.router)
     return app
 
 
