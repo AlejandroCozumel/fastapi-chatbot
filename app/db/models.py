@@ -83,3 +83,26 @@ class DocumentChunk(TimestampMixin, Base):
     embedding_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     document: Mapped[Document] = relationship(back_populates="chunks")
+
+
+class EmailDraft(TimestampMixin, Base):
+    __tablename__ = "email_drafts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    recipient: Mapped[str] = mapped_column(String(320))
+    subject: Mapped[str] = mapped_column(String(255))
+    body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="draft")
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class EmailSendRecord(TimestampMixin, Base):
+    __tablename__ = "email_send_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    draft_id: Mapped[int] = mapped_column(ForeignKey("email_drafts.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    provider_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(20))
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
