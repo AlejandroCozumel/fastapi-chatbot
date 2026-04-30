@@ -2,7 +2,7 @@ services:
   api:
     build: .
     env_file:
-      - .env
+      - .env.example
     ports:
       - "8000:8000"
     volumes:
